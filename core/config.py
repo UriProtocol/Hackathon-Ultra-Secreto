@@ -14,4 +14,6 @@ class Settings:
     CHROMA_TENANT = os.getenv("CHROMA_TENANT")
     CHROMA_DATABASE = os.getenv("CHROMA_DATABASE")
 
+    OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
+
 settings = Settings()
