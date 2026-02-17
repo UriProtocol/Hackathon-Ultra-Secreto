@@ -1,0 +1,4 @@
+from services.academic_ingestion.institutions import fetch_nuevo_leon_institutions
+from core.database import bulk_insert_institutions
+
+bulk_insert_institutions(fetch_nuevo_leon_institutions())

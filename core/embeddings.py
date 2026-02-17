@@ -7,11 +7,14 @@ client = chromadb.CloudClient(
     database=settings.CHROMA_DATABASE
 )
 
-collection = client.get_or_create_collection("documents")
+collection = client.get_or_create_collection(
+    name="documents"
+)
 
-def store_embedding(document_id, embedding, metadata=None):
-    collection.add(
+def store_embedding(document_id, embedding, document_text, metadata=None):
+    collection.upsert(
         ids=[str(document_id)],
         embeddings=[embedding],
+        documents=[document_text],   # 👈 MUY IMPORTANTE
         metadatas=[metadata or {}]
     )

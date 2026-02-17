@@ -1,25 +1,48 @@
-import requests
-from core.database import insert_document
+from core.database import _flush_batch
+from services.academic_ingestion.extractor import fetch_works
+from services.academic_ingestion.transformer import normalize_work
+from core.database import get_connection
 
-OPENALEX_URL = "https://api.openalex.org/works"
+BATCH_SIZE = 500
 
-def ingest_openalex(query="mexico"):
-    response = requests.get(OPENALEX_URL, params={
-        "filter": "authorships.institutions.country_code:MX",
-        "per-page": 5
-    })
+def bulk_insert_works(year):
 
-    data = response.json()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    for work in data.get("results", []):
-        doi = work.get("doi")
-        title = work.get("title")
+    documents_batch = []
+    metadata_batch = []
 
-        if doi:
-            doc_id = insert_document(
-                source_type="academic",
-                identifier=doi,
-                title=title
-            )
+    try:
+        for work in fetch_works(year):
+            w = normalize_work(work)
 
-            print("Inserted academic:", doc_id)
+            # -------------------
+            # documents
+            # -------------------
+            documents_batch.append((
+                w["source_type"],
+                w["canonical_identifier"],
+                w["title"],
+                w["raw_text"]
+            ))
+
+            # metadata (se insertará después)
+            metadata_batch.append(w)
+
+            if len(documents_batch) >= BATCH_SIZE:
+                _flush_batch(cur, documents_batch, metadata_batch)
+                documents_batch = []
+                metadata_batch = []
+
+        if documents_batch:
+            _flush_batch(cur, documents_batch, metadata_batch)
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
