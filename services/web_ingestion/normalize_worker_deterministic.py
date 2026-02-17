@@ -103,6 +103,19 @@ def clean_markdown(md: str) -> str:
             continue
         prev = l
 
+        if l.count("](") >= 3:   # 3+ links en una sola línea suele ser navegación
+            continue
+
+        # si es bullet de navegación con link y texto corto
+        if l.startswith("* [") and len(l) < 120:
+            continue
+
+            # Si hay demasiadas líneas de bullets, probablemente es navegación
+    bullet_lines = [x for x in cleaned if x.startswith("* ")]
+    if len(bullet_lines) > 40:
+        # deja bullets solo si son pocos; si son muchos, quítalos todos
+        cleaned = [x for x in cleaned if not x.startswith("* ")]
+
         cleaned.append(l)
 
     # quita duplicados comunes (menú repetido, etc.)
