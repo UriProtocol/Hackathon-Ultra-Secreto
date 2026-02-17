@@ -1,3 +1,4 @@
+import json
 import psycopg2
 from core.config import settings
 
@@ -115,7 +116,7 @@ def fetch_pending_web_documents(limit=10):
         FROM documents
         WHERE source_type = 'serpapi'
           AND raw_text IS NULL
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC
         LIMIT %s
         """,
         (limit,),
@@ -128,8 +129,6 @@ def fetch_pending_web_documents(limit=10):
 
     return [{"id": r[0], "url": r[1]} for r in rows]
 
-    import json
-
 def fetch_pending_web_metadata(limit=5):
     conn = get_connection()
     cur = conn.cursor()
@@ -140,7 +139,7 @@ def fetch_pending_web_metadata(limit=5):
         WHERE d.source_type = 'serpapi'
           AND d.raw_text IS NOT NULL
           AND wm.document_id IS NULL
-        ORDER BY d.created_at ASC
+        ORDER BY d.created_at DESC
         LIMIT %s
     """, (limit,))
     rows = cur.fetchall()

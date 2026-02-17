@@ -3,4 +3,4 @@ from services.web_ingestion.ingest import ingest_web_seeds_from_serpapi
 
 if __name__ == "__main__":
     #ingest_openalex()
-    ingest_web_seeds_from_serpapi("investigadores cinestav", num_results=10, page_limit=1)
+    ingest_web_seeds_from_serpapi("Directorio del cinestav nuevo leon", num_results=10, page_limit=1)
