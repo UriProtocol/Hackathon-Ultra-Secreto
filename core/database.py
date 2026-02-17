@@ -166,7 +166,8 @@ def get_nuevo_leon_institution_ids():
 
 
 def _flush_batch(cur, documents_batch, metadata_batch):
-
+    """Insert documents, metadata, authors and their relationships"""
+    
     # ---------------------------------
     # 1️⃣ Insert documents en bulk
     # ---------------------------------
@@ -194,7 +195,42 @@ def _flush_batch(cur, documents_batch, metadata_batch):
     doc_id_map = {row[1]: row[0] for row in result}
 
     # ---------------------------------
-    # 2️⃣ Preparar academic_metadata
+    # 2️⃣ Insert/Update authors
+    # ---------------------------------
+    all_authors = []
+    for w in metadata_batch:
+        all_authors.extend(w.get("authors_list", []))
+    
+    # Deduplicate authors by ID
+    unique_authors = {a["openalex_id"]: a for a in all_authors if a.get("openalex_id")}.values()
+    
+    if unique_authors:
+        insert_authors_sql = """
+            INSERT INTO authors 
+            (openalex_id, display_name, orcid, last_known_institution_id, works_count, cited_by_count)
+            VALUES %s
+            ON CONFLICT (openalex_id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                orcid = EXCLUDED.orcid,
+                updated_at = CURRENT_TIMESTAMP
+        """
+        
+        author_values = [
+            (
+                a["openalex_id"],
+                a.get("display_name"),
+                a.get("orcid"),
+                a.get("last_known_institution_id"),
+                a.get("works_count", 0),
+                a.get("cited_by_count", 0)
+            )
+            for a in unique_authors
+        ]
+        
+        execute_values(cur, insert_authors_sql, author_values)
+
+    # ---------------------------------
+    # 3️⃣ Insert academic_metadata
     # ---------------------------------
     metadata_values = []
 
@@ -205,49 +241,126 @@ def _flush_batch(cur, documents_batch, metadata_batch):
             continue
 
         metadata_values.append((
-            doc_id_map[identifier],
-            w["doi"],
-            w["journal_name"],
-            w["publisher"],
-            w["issn"],
-            w["publication_year"],
-            w["citation_count"],
-            w["is_open_access"],
-            w["open_access_url"],
-            json.dumps(w["authors"]),
-            json.dumps(w["institutions"]),
-            json.dumps(w["concepts"]),
-            json.dumps(w["raw_source"])
+            doc_id_map[identifier],  # document_id
+            w.get("doi"),
+            w.get("journal_name"),
+            w.get("publisher"),
+            w.get("issn"),
+            w.get("publication_year"),
+            w.get("citation_count"),
+            w.get("is_open_access"),
+            w.get("open_access_url"),
+            json.dumps(w.get("authors", [])),
+            json.dumps(w.get("institutions", [])),
+            json.dumps(w.get("concepts", [])),
+            json.dumps(w.get("raw_source", {}))
         ))
 
-    if not metadata_values:
-        return
+    if metadata_values:
+        insert_metadata_sql = """
+            INSERT INTO academic_metadata (
+                document_id,
+                doi,
+                journal_name,
+                publisher,
+                issn,
+                publication_year,
+                citation_count,
+                is_open_access,
+                open_access_url,
+                authors,
+                institutions,
+                concepts,
+                raw_source
+            )
+            VALUES %s
+            ON CONFLICT (doi)
+            DO UPDATE SET
+                citation_count = EXCLUDED.citation_count,
+                updated_at = NOW()
+        """
+        
+        execute_values(cur, insert_metadata_sql, metadata_values)
 
-    insert_metadata_sql = """
-        INSERT INTO academic_metadata (
-            document_id,
-            doi,
-            journal_name,
-            publisher,
-            issn,
-            publication_year,
-            citation_count,
-            is_open_access,
-            open_access_url,
-            authors,
-            institutions,
-            concepts,
-            raw_source
-        )
-        VALUES %s
-        ON CONFLICT (doi)
-        DO UPDATE SET
-            citation_count = EXCLUDED.citation_count,
-            updated_at = NOW()
-    """
+    # ---------------------------------
+    # 4️⃣ Insert academic_metadata_institutions pivot
+    # ---------------------------------
+    inst_pivot_values = []
 
-    execute_values(
-        cur,
-        insert_metadata_sql,
-        metadata_values
-    )
+    for w in metadata_batch:
+        identifier = w["canonical_identifier"]
+
+        if identifier not in doc_id_map:
+            continue
+
+        document_id = doc_id_map[identifier]
+
+        for inst in w.get("institutions", []):
+            openalex_id = inst.get("id")
+
+            if not openalex_id:
+                continue
+
+            inst_pivot_values.append((
+                document_id,
+                openalex_id
+            ))
+
+    if inst_pivot_values:
+        insert_inst_pivot_sql = """
+            INSERT INTO academic_metadata_institutions (
+                document_id,
+                institution_openalex_id
+            )
+            VALUES %s
+            ON CONFLICT DO NOTHING
+        """
+
+        execute_values(cur, insert_inst_pivot_sql, inst_pivot_values)
+
+ # ---------------------------------
+    # 5️⃣ Insert academic_metadata_authors pivot
+    # ---------------------------------
+    author_pivot_values = []
+    
+    for w in metadata_batch:
+        identifier = w["canonical_identifier"]
+        
+        if identifier not in doc_id_map:
+            continue
+            
+        document_id = doc_id_map[identifier]
+        
+        # Get the academic_metadata id (you might need to retrieve this if you need it)
+        # For now, we'll use document_id as the academic_metadata_id if they're 1:1
+        for pivot in w.get("pivot_authors", []):
+            author_pivot_values.append((
+                document_id,  # academic_metadata_id (assuming 1:1 with document)
+                pivot.get("author_openalex_id"),
+                pivot.get("author_position"),
+                pivot.get("raw_affiliation")
+            ))
+    
+    if author_pivot_values:
+        # 🔥 FIX: Deduplicate pivot values to avoid ON CONFLICT errors
+        unique_pivot_values = {}
+        for value in author_pivot_values:
+            key = (value[0], value[1])  # (academic_metadata_id, author_openalex_id)
+            if key not in unique_pivot_values:
+                unique_pivot_values[key] = value
+        
+        deduplicated_values = list(unique_pivot_values.values())
+        
+        # print(f"   📊 Pivot authors: {len(author_pivot_values)} total, {len(deduplicated_values)} unique after deduplication")
+        
+        insert_author_pivot_sql = """
+            INSERT INTO academic_metadata_authors 
+            (academic_metadata_id, author_openalex_id, author_position, raw_affiliation)
+            VALUES %s
+            ON CONFLICT (academic_metadata_id, author_openalex_id) 
+            DO UPDATE SET
+                author_position = EXCLUDED.author_position,
+                raw_affiliation = EXCLUDED.raw_affiliation
+        """
+        
+        execute_values(cur, insert_author_pivot_sql, deduplicated_values)
