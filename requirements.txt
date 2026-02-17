@@ -2,5 +2,7 @@ psycopg2-binary
 chromadb
 python-dotenv
 requests
+sentence-transformers
+torch
 pyalex
 sqlalchemy

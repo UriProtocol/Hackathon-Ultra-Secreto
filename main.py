@@ -1,3 +1,6 @@
+from services.academic_ingestion.ingest import ingest_openalex
+from services.web_ingestion.ingest import ingest_web_seeds_from_serpapi
+
 #!/usr/bin/env python
 """
 Script principal para el Hackathon Ultra Secreto
@@ -225,6 +228,9 @@ def main():
             run_all_pipeline(year, vector_limit)
         except ValueError:
             print_error("El año y el límite deben ser números válidos")
+    
+    elif command == "serpapi":
+      ingest_web_seeds_from_serpapi("Directorio del cinestav nuevo leon", num_results=10, page_limit=1)
     
     else:
         print_error(f"Comando desconocido: '{command}'")
