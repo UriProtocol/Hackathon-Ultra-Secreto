@@ -41,7 +41,6 @@ def insert_document(source_type, identifier, title, raw_text=None):
     )
 
     result = cur.fetchone()
-
     conn.commit()
     cur.close()
     conn.close()
@@ -70,7 +69,6 @@ def update_document_raw_text_by_identifier(identifier, raw_text):
     )
 
     result = cur.fetchone()
-
     conn.commit()
     cur.close()
     conn.close()
@@ -100,7 +98,7 @@ def update_document_raw_text_by_id(doc_id, raw_text):
 
 
 # -------------------------
-# Fetch pending documents
+# Fetch pending documents (crawl)
 # -------------------------
 def fetch_pending_web_documents(limit=10):
     """
@@ -123,16 +121,23 @@ def fetch_pending_web_documents(limit=10):
     )
 
     rows = cur.fetchall()
-
     cur.close()
     conn.close()
 
     return [{"id": r[0], "url": r[1]} for r in rows]
 
+
+# -------------------------
+# Fetch pending web_metadata (create row if missing)
+# -------------------------
 def fetch_pending_web_metadata(limit=5):
+    """
+    Docs con raw_text pero sin fila en web_metadata.
+    """
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT d.id, d.canonical_identifier, d.title, d.raw_text
         FROM documents d
         LEFT JOIN web_metadata wm ON wm.document_id = d.id
@@ -141,7 +146,9 @@ def fetch_pending_web_metadata(limit=5):
           AND wm.document_id IS NULL
         ORDER BY d.created_at DESC
         LIMIT %s
-    """, (limit,))
+        """,
+        (limit,),
+    )
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -151,17 +158,56 @@ def fetch_pending_web_metadata(limit=5):
         for r in rows
     ]
 
+
+# -------------------------
+# Fetch web_metadata that needs refresh (cleaned_text empty or wrong version)
+# -------------------------
+def fetch_web_metadata_needing_refresh(limit=50):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT d.id, d.canonical_identifier, d.title, d.raw_text
+        FROM documents d
+        JOIN web_metadata wm ON wm.document_id = d.id
+        WHERE d.source_type = 'serpapi'
+          AND d.raw_text IS NOT NULL
+          AND (
+            COALESCE(wm.data->>'cleaned_text','') = ''
+            OR COALESCE(wm.data->>'version','') <> 'det_v1'
+          )
+        ORDER BY d.created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {"id": r[0], "url": r[1], "title": r[2] or "", "raw_text": r[3] or ""}
+        for r in rows
+    ]
+
+
+# -------------------------
+# Upsert web_metadata
+# -------------------------
 def upsert_web_metadata(document_id, url, content_type, data: dict):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO web_metadata (document_id, url, content_type, data)
         VALUES (%s, %s, %s, %s::jsonb)
         ON CONFLICT (document_id) DO UPDATE SET
           url = EXCLUDED.url,
           content_type = EXCLUDED.content_type,
           data = EXCLUDED.data
-    """, (document_id, url, content_type, json.dumps(data)))
+        """,
+        (document_id, url, content_type, json.dumps(data)),
+    )
     conn.commit()
     cur.close()
     conn.close()
