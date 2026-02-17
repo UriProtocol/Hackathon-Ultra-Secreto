@@ -1,5 +1,3 @@
-# services/web_ingestion/search_fts.py
-
 from core.database import get_connection
 
 def search_fts(query: str, limit: int = 10):

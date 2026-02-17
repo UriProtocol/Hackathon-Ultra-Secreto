@@ -1,5 +1,6 @@
 import os
 import time
+import re
 from typing import List, Dict, Any
 
 import psycopg2
@@ -7,6 +8,60 @@ from sentence_transformers import SentenceTransformer
 
 import chromadb
 from core.config import settings
+
+
+# -------------------------
+# Clean text
+# -------------------------
+def clean_text_for_embedding(text: str) -> str:
+    """
+    Limpieza agresiva de ruido común en web antes de embedding.
+    """
+    if not text:
+        return ""
+
+    # 1. Eliminar URLs
+    text = re.sub(r'https?://\S+|www\.\S+', '', text)
+
+    # 2. Eliminar líneas de navegación/ruido típicas
+    noise_patterns = [
+        r'Leer más', r'Ver perfil', r'Explorar →', r'RSS', r'Síguenos',
+        r'Menú', r'Inicio', r'Contacto', r'Acerca de', r'Política de privacidad',
+        r'Términos y condiciones', r'Copyright', r'Todos los derechos reservados',
+        r'Ir al contenido', r'Saltar al contenido'
+    ]
+    # Compilamos una sola regex para todas las frases de ruido (case insensitive)
+    pattern_regex = re.compile(r'\b(?:' + '|'.join(map(re.escape, noise_patterns)) + r')\b', re.IGNORECASE)
+    text = pattern_regex.sub('', text)
+
+    # 3. Eliminar pipes y bullets sueltos
+    text = re.sub(r'\|', ' ', text)
+    
+    # 4. Procesamiento línea por línea
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        
+        # Eliminar bullets vacíos o líneas con solo símbolos
+        if re.match(r'^[-•*➢\s]+$', line):
+            continue
+            
+        # Si la línea tiene menos de 2 caracteres alfanuméricos, se descarta (probablemente ruido)
+        if len(re.findall(r'[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]', line)) < 2:
+            continue
+            
+        lines.append(line)
+    
+    text = " ".join(lines)  # Unimos con espacio para luego normalizar
+
+    # 5. Normalizar espacios (múltiples espacios -> uno solo)
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # 6. Unir palabras cortadas por guión (hiphenation simple)
+    # "infor- mación" -> "información"
+    text = re.sub(r'([a-zA-ZáéíóúÁÉÍÓÚñÑüÜ])-\s+([a-zA-ZáéíóúÁÉÍÓÚñÑüÜ])', r'\1\2', text)
+
+    return text
 
 
 # -------------------------
@@ -146,7 +201,8 @@ def run(limit_docs: int = 5, sleep_s: float = 0.1):
         doc_id = str(d["document_id"])
         url = d["url"]
         title = d["title"] or ""
-        cleaned = d["cleaned_text"] or ""
+        # Limpieza previa antes de chunking
+        cleaned = clean_text_for_embedding(d["cleaned_text"] or "")
 
         try:
             chunks = chunk_text(cleaned, max_chars=1200, overlap=150)
