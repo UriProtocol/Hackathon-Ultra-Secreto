@@ -22,5 +22,6 @@ class Settings:
     SERPAPI_ENGINE = os.getenv("SERPAPI_ENGINE", "google")
     SERPAPI_GL = os.getenv("SERPAPI_GL", "mx")
     SERPAPI_HL = os.getenv("SERPAPI_HL", "es")
+    OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
 
 settings = Settings()
